@@ -19,6 +19,7 @@ int main(void)
 
     Elevator_Init(&controller);
 
+    printf("--------------------------------------\n");
     printf("Embedded Elevator Controller Simulation\n");
     printf("--------------------------------------\n");
     printf("Valid floors: 1 to 3\n");

@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Elevator Controller",
+      "type": "shell",
+      "command": "gcc",
+      "args": [
+        "-g",
+        "main.c",
+        "elevator_controller.c",
+        "-o",
+        "elevator_controller.exe"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
