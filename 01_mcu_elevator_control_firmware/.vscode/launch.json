@@ -2,16 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug main.exe",
+      "name": "Debug Elevator Controller",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${fileDirname}\\output\\${fileBasenameNoExtension}.exe",
-      "cwd": "${fileDirname}",
-      "MIMode": "gdb",
-      "miDebuggerPath": "C:\\msys64\\mingw64\\bin\\gdb.exe",
+      "program": "${workspaceFolder}/elevator_controller.exe",
+      "args": [],
       "stopAtEntry": true,
-      "preLaunchTask": "Build C with GCC",
-      "externalConsole": true
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "C:/msys64/mingw64/bin/gdb.exe",
+      "preLaunchTask": "Build Elevator Controller"
     }
   ]
 }

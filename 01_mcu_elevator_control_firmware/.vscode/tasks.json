@@ -2,25 +2,21 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Build C with GCC",
+      "label": "Build Elevator Controller",
       "type": "shell",
       "command": "gcc",
       "args": [
-        "-Wall",
-        "-Wextra",
-        "-g3",
-        "${file}",
+        "-g",
+        "main.c",
+        "elevator_controller.c",
         "-o",
-        "${fileDirname}\\output\\${fileBasenameNoExtension}.exe"
+        "elevator_controller.exe"
       ],
-      "options": {
-        "cwd": "${fileDirname}"
-      },
-      "problemMatcher": ["$gcc"],
       "group": {
         "kind": "build",
         "isDefault": true
-      }
+      },
+      "problemMatcher": ["$gcc"]
     }
   ]
 }
