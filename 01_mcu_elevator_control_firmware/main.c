@@ -12,6 +12,11 @@ int main(void)
     ElevatorController controller;
     ElevatorInputs inputs;
 
+    int door_obstruction_input;
+    int emergency_stop_input;
+    int upper_limit_input;
+    int lower_limit_input;
+
     Elevator_Init(&controller);
 
     printf("Embedded Elevator Controller Simulation\n");
@@ -35,16 +40,21 @@ int main(void)
         scanf("%d", &inputs.requested_floor);
 
         printf("Door obstruction? 1=yes, 0=no: ");
-        scanf("%d", (int *)&inputs.door_obstruction);
+        scanf("%d", &door_obstruction_input);
 
         printf("Emergency stop? 1=yes, 0=no: ");
-        scanf("%d", (int *)&inputs.emergency_stop);
+        scanf("%d", &emergency_stop_input);
 
         printf("Upper limit switch active? 1=yes, 0=no: ");
-        scanf("%d", (int *)&inputs.upper_limit_switch);
+        scanf("%d", &upper_limit_input);
 
         printf("Lower limit switch active? 1=yes, 0=no: ");
-        scanf("%d", (int *)&inputs.lower_limit_switch);
+        scanf("%d", &lower_limit_input);
+
+        inputs.door_obstruction = door_obstruction_input ? true : false;
+        inputs.emergency_stop = emergency_stop_input ? true : false;
+        inputs.upper_limit_switch = upper_limit_input ? true : false;
+        inputs.lower_limit_switch = lower_limit_input ? true : false;
 
         Elevator_Update(&controller, inputs);
 
