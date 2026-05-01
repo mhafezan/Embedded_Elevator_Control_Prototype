@@ -20,12 +20,12 @@ int main(void)
     Elevator_Init(&controller);
 
     printf("--------------------------------------\n");
-    printf("Embedded Elevator Controller Simulation\n");
+    printf("Embedded Elevator Controller Simulation Started\n");
     printf("--------------------------------------\n");
     printf("Valid floors: 1 to 3\n");
     printf("Enter 0 as requested floor to keep the previous target.\n");
     printf("Enter emergency stop = 1 to trigger emergency stop.\n");
-    printf("Press Ctrl+C to exit.\n\n");
+    printf("Press Ctrl+C to exit from simulation.\n\n");
 
     while (true)
     {

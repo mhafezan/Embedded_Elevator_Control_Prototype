@@ -1,20 +1,17 @@
-// Debug configuration for Visual Studio Code to launch the elevator controller executable with GDB.
 {
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Elevator Controller",
+      "name": "Debug main.exe",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/elevator_controller.exe",
-      "args": [],
-      "stopAtEntry": true,
-      "cwd": "${workspaceFolder}",
-      "environment": [],
-      "externalConsole": false,
+      "program": "${fileDirname}\\output\\${fileBasenameNoExtension}.exe",
+      "cwd": "${fileDirname}",
       "MIMode": "gdb",
-      "miDebuggerPath": "C:/msys64/mingw64/bin/gdb.exe",
-      "preLaunchTask": "Build Elevator Controller"
+      "miDebuggerPath": "C:\\msys64\\mingw64\\bin\\gdb.exe",
+      "stopAtEntry": true,
+      "preLaunchTask": "Build C with GCC",
+      "externalConsole": true
     }
   ]
 }
