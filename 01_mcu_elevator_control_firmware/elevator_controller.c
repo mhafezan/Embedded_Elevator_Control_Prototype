@@ -77,8 +77,7 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
     /*
      * Ignore invalid floor requests.
      */
-    if (inputs.requested_floor >= MIN_FLOOR &&
-        inputs.requested_floor <= MAX_FLOOR)
+    if (inputs.requested_floor >= MIN_FLOOR && inputs.requested_floor <= MAX_FLOOR)
     {
         controller->target_floor = inputs.requested_floor;
     }

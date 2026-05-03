@@ -29,7 +29,7 @@ int main(void)
 
     while (true)
     {
-        inputs.requested_floor = 0;
+        inputs.requested_floor = 0; // Default to no new request each cycle
         inputs.door_obstruction = false;
         inputs.emergency_stop = false;
         inputs.upper_limit_switch = false;
