@@ -8,6 +8,11 @@ void Elevator_Init(ElevatorController *controller)
 {
     controller->current_floor = 1;
     controller->target_floor = 1;
+    controller->request_count = 0;
+
+    for (int i = 0; i < REQUEST_QUEUE_SIZE; i++)
+        controller->request_queue[i] = 0;
+
     controller->state = STATE_IDLE;
     controller->motor = MOTOR_STOP;
     controller->door_open = false;
@@ -53,6 +58,70 @@ const char *Elevator_MotorToString(MotorCommand motor)
     }
 }
 
+/*******************************
+    FIFO request queue functions
+********************************/
+
+static bool Elevator_IsQueueFull(const ElevatorController *controller)
+{
+    return controller->request_count >= REQUEST_QUEUE_SIZE;
+}
+
+static bool Elevator_IsQueueEmpty(const ElevatorController *controller)
+{
+    return controller->request_count == 0;
+}
+
+static bool Elevator_RequestAlreadyExists(const ElevatorController *controller, int floor)
+{
+    for (int i = 0; i < controller->request_count; i++)
+    {
+        if (controller->request_queue[i] == floor)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void Elevator_EnqueueRequest(ElevatorController *controller, int floor)
+{
+    if (floor < MIN_FLOOR || floor > MAX_FLOOR)
+    {
+        return;
+    }
+
+    if (Elevator_IsQueueFull(controller))
+    {
+        return;
+    }
+
+    if (Elevator_RequestAlreadyExists(controller, floor))
+    {
+        return;
+    }
+
+    controller->request_queue[controller->request_count] = floor;
+    controller->request_count++;
+}
+
+static void Elevator_DequeueRequest(ElevatorController *controller)
+{
+    if (Elevator_IsQueueEmpty(controller))
+    {
+        return;
+    }
+
+    for (int i = 0; i < controller->request_count - 1; i++)
+    {
+        controller->request_queue[i] = controller->request_queue[i + 1];
+    }
+
+    controller->request_count--;
+    controller->request_queue[controller->request_count] = 0;
+}
+
 /*
  * Main elevator control logic.
  *
@@ -74,12 +143,14 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         return;
     }
 
-    /*
-     * Ignore invalid floor requests.
-     */
     if (inputs.requested_floor >= MIN_FLOOR && inputs.requested_floor <= MAX_FLOOR)
     {
-        controller->target_floor = inputs.requested_floor;
+        Elevator_EnqueueRequest(controller, inputs.requested_floor);
+    }
+
+    if (!Elevator_IsQueueEmpty(controller))
+    {
+        controller->target_floor = controller->request_queue[0];
     }
 
     /*
@@ -172,24 +243,22 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         controller->motor = MOTOR_STOP;
         controller->door_open = true;
 
-        /*
-         * If the door is obstructed, keep the door open.
-         */
         if (inputs.door_obstruction)
         {
             controller->door_open = true;
         }
         else
         {
-            /*
-             * After one update cycle without obstruction, close the door
-             * and return to IDLE.
-             */
+            if (!Elevator_IsQueueEmpty(controller) &&
+                controller->current_floor == controller->request_queue[0])
+            {
+                Elevator_DequeueRequest(controller);
+            }
+
             controller->door_open = false;
             controller->state = STATE_IDLE;
         }
         break;
-
     case STATE_EMERGENCY_STOP:
         controller->motor = MOTOR_STOP;
         controller->door_open = false;

@@ -23,13 +23,13 @@ int main(void)
     printf("Embedded Elevator Controller Simulation Started\n");
     printf("--------------------------------------\n");
     printf("Valid floors: 1 to 3\n");
-    printf("Enter 0 as requested floor to keep the previous target.\n");
+    printf("Enter 0 as requested floor for no new request.\n");
     printf("Enter emergency stop = 1 to trigger emergency stop.\n");
     printf("Press Ctrl+C to exit from simulation.\n\n");
 
     while (true)
     {
-        inputs.requested_floor = 0; // Default to no new request each cycle
+        inputs.requested_floor = 0;
         inputs.door_obstruction = false;
         inputs.emergency_stop = false;
         inputs.upper_limit_switch = false;
@@ -37,7 +37,7 @@ int main(void)
 
         Elevator_PrintStatus(&controller);
 
-        printf("\nEnter requested floor 1-3, or 0 for no new request: ");
+        printf("\nEnter requested floor 1 to 3, or 0 for no new request: ");
         scanf("%d", &inputs.requested_floor);
 
         printf("Door obstruction? 1=yes, 0=no: ");

@@ -11,6 +11,7 @@
 
 #define MIN_FLOOR 1
 #define MAX_FLOOR 3
+#define REQUEST_QUEUE_SIZE MAX_FLOOR
 
 typedef enum
 {
@@ -41,6 +42,8 @@ typedef struct
 {
     int current_floor;
     int target_floor;
+    int request_queue[REQUEST_QUEUE_SIZE];
+    int request_count;
     ElevatorState state;
     MotorCommand motor;
     bool door_open;
