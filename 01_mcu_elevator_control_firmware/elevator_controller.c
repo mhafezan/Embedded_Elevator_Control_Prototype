@@ -143,9 +143,28 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         return;
     }
 
-    if (inputs.requested_floor >= MIN_FLOOR && inputs.requested_floor <= MAX_FLOOR)
+    /* A cabin request is generated when a passenger inside the elevator selects a destination floor.*/
+
+    if (inputs.cabin_request_floor >= MIN_FLOOR &&
+        inputs.cabin_request_floor <= MAX_FLOOR)
     {
-        Elevator_EnqueueRequest(controller, inputs.requested_floor);
+        Elevator_EnqueueRequest(controller, inputs.cabin_request_floor);
+    }
+
+    /*A hall UP request is generated when a passenger outside the elevator requests to travel upward.*/
+
+    if (inputs.hall_up_request_floor >= MIN_FLOOR &&
+        inputs.hall_up_request_floor <= MAX_FLOOR)
+    {
+        Elevator_EnqueueRequest(controller, inputs.hall_up_request_floor);
+    }
+
+    /* Add hall DOWN request. A hall DOWN request is generated when a passenger outside the elevator requests to travel downward.*/
+
+    if (inputs.hall_down_request_floor >= MIN_FLOOR &&
+        inputs.hall_down_request_floor <= MAX_FLOOR)
+    {
+        Elevator_EnqueueRequest(controller, inputs.hall_down_request_floor);
     }
 
     if (!Elevator_IsQueueEmpty(controller))
@@ -173,9 +192,8 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         return;
     }
 
-    /*
-     * State-machine behavior.
-     */
+    /*** State-machine behavior. ***/
+    
     switch (controller->state)
     {
     case STATE_IDLE:

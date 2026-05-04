@@ -10,7 +10,7 @@
  */
 
 #define MIN_FLOOR 1
-#define MAX_FLOOR 3
+#define MAX_FLOOR 10
 #define REQUEST_QUEUE_SIZE MAX_FLOOR
 
 typedef enum
@@ -31,7 +31,10 @@ typedef enum
 
 typedef struct
 {
-    int requested_floor;
+    int cabin_request_floor;
+    int hall_up_request_floor;
+    int hall_down_request_floor;
+
     bool door_obstruction;
     bool emergency_stop;
     bool upper_limit_switch;
