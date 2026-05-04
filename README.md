@@ -268,25 +268,6 @@ Potential extensions to this project include:
 - Add graphical simulation or serial-monitor interface.
 - Add integration with an RTOS task loop.
 
-## Skills Demonstrated
-
-This project demonstrates practical skills relevant to embedded systems and firmware development, including:
-
-- C programming
-- Finite state machines
-- Modular firmware design
-- Header/source file separation
-- Input validation
-- Safety-oriented control logic
-- Debug/status printing
-- Terminal-based simulation
-- Basic queue management
-- GCC-based compilation
-
-## License
-
-This project is provided for educational and portfolio purposes. You may add an open-source license such as the MIT License if you plan to make the repository public.
-
 ## Author
 
 **Mohammad Hafezan**
