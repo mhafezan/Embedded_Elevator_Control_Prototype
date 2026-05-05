@@ -1,275 +1,320 @@
-# Embedded Elevator Controller Simulation in C
+# Embedded Elevator Control Prototype
 
-## Overview
+A C-based embedded elevator controller prototype that simulates the core logic of a multi-floor elevator system using a finite-state machine. The project includes both a terminal-based simulator and a graphical simulator built with raylib.
 
-This repository contains a simplified **embedded elevator controller simulation** written in C. The project demonstrates how a basic elevator control algorithm can be implemented using a finite-state machine, motor command logic, floor-request handling, and safety-related input signals.
+This project demonstrates embedded control concepts such as state-machine design, safety input handling, request queue management, motor control logic, and separation between controller firmware logic and user-interface visualization.
 
-The program is designed as a small embedded-systems-style prototype. It simulates the type of control logic that could run periodically on a microcontroller after reading digital inputs such as push buttons, limit switches, emergency-stop signals, and door-obstruction sensors.
+---
 
-## Project Objectives
+## Project Overview
 
-The main objectives of this project are to demonstrate:
+The system models a simplified elevator controller for a 10-floor building. The controller processes cabin requests, hall requests, door obstruction signals, emergency stop input, and upper/lower limit switch conditions. Based on these inputs, it updates the elevator state, motor command, current floor, target floor, door status, and pending request queue.
 
-- Finite-state-machine-based elevator control logic
-- Basic embedded firmware structure in C
-- Separation between application logic and controller logic
-- Safe motor-control decisions based on system state and input signals
-- Handling of floor requests using a FIFO request queue
-- Emergency-stop and limit-switch protection logic
-- Terminal-based simulation for testing controller behavior
+The project is structured to resemble the type of control logic that could run periodically on a microcontroller after reading GPIO or sensor inputs.
 
-## Features
+---
 
-The elevator controller supports the following features:
+## Key Features
 
-- Three-floor elevator operation
-- Floor request input from the terminal
-- FIFO-based request queue
-- Duplicate request filtering
-- Motor control commands:
-  - Stop
-  - Move up
-  - Move down
-- Elevator states:
-  - Idle
-  - Moving up
-  - Moving down
-  - Door open
-  - Emergency stop
-- Door-obstruction handling
-- Emergency-stop handling with highest priority
-- Upper and lower limit-switch protection
-- Status printing for debugging and simulation
+- Finite-state machine-based elevator control logic
+- Supports 10 floors by default
+- Cabin floor requests
+- Hall UP and Hall DOWN requests
+- FIFO request queue
+- Duplicate request prevention
+- Emergency stop handling with highest priority
+- Door obstruction handling
+- Upper and lower limit switch protection
+- Terminal-based simulation
+- Professional GUI simulation using raylib
+- Modular separation between controller logic and visualization
 
-## Repository Structure
-
-```text
-.
-├── main.c
-├── elevator_controller.c
-├── elevator_controller.h
-└── README.md
-```
-
-### File Descriptions
-
-| File | Description |
-|---|---|
-| `main.c` | Provides the terminal-based simulation interface. It collects user inputs, calls the elevator controller update function, and prints the updated controller status. |
-| `elevator_controller.c` | Implements the elevator controller logic, including initialization, state transitions, request queue management, motor control, and safety handling. |
-| `elevator_controller.h` | Defines constants, data structures, enumerations, and public function prototypes used by the elevator controller. |
-| `README.md` | Project documentation. |
-
-## System Architecture
-
-The project separates the elevator simulation into two main layers:
-
-1. **Application Layer**  
-   Implemented in `main.c`. This layer handles user interaction through the terminal and passes input signals to the controller.
-
-2. **Controller Logic Layer**  
-   Implemented in `elevator_controller.c` and declared in `elevator_controller.h`. This layer contains the elevator finite-state machine, request queue, safety logic, and motor-control decisions.
-
-This structure is similar to a simple embedded firmware design, where the main loop repeatedly reads inputs, updates the controller, and writes outputs.
+---
 
 ## Elevator States
 
-The elevator controller uses the following states:
+The controller supports the following operating states:
 
 | State | Description |
 |---|---|
-| `STATE_IDLE` | Elevator is stopped and waiting for a floor request. |
-| `STATE_MOVING_UP` | Elevator is moving upward toward the target floor. |
-| `STATE_MOVING_DOWN` | Elevator is moving downward toward the target floor. |
-| `STATE_DOOR_OPEN` | Elevator has reached the requested floor and the door is open. |
-| `STATE_EMERGENCY_STOP` | Elevator movement is disabled due to an emergency-stop condition. |
+| `STATE_IDLE` | Elevator is stopped and waiting for a valid request |
+| `STATE_MOVING_UP` | Elevator is moving upward toward the target floor |
+| `STATE_MOVING_DOWN` | Elevator is moving downward toward the target floor |
+| `STATE_DOOR_OPEN` | Elevator has arrived and the door is open |
+| `STATE_EMERGENCY_STOP` | Emergency stop is active and motor movement is disabled |
+
+---
 
 ## Motor Commands
 
-The controller generates one of the following motor commands:
+The motor output is represented using three commands:
 
-| Command | Description |
+| Motor Command | Description |
 |---|---|
-| `MOTOR_STOP` | Stop elevator movement. |
-| `MOTOR_UP` | Move elevator upward. |
-| `MOTOR_DOWN` | Move elevator downward. |
+| `MOTOR_STOP` | Motor is stopped |
+| `MOTOR_UP` | Motor moves the elevator upward |
+| `MOTOR_DOWN` | Motor moves the elevator downward |
 
-## Input Signals
+---
 
-The simulation accepts the following input signals:
+## Safety Inputs
+
+The controller supports the following safety-related inputs:
 
 | Input | Description |
 |---|---|
-| `requested_floor` | Requested destination floor. Valid values are 1 to 3. A value of 0 means no new request. |
-| `door_obstruction` | Indicates whether the door is obstructed. |
-| `emergency_stop` | Immediately stops elevator movement and places the controller in emergency-stop state. |
-| `upper_limit_switch` | Prevents upward movement when the elevator reaches the upper physical limit. |
-| `lower_limit_switch` | Prevents downward movement when the elevator reaches the lower physical limit. |
+| `emergency_stop` | Immediately stops the elevator and enters emergency mode |
+| `door_obstruction` | Keeps the door open while an obstruction is detected |
+| `upper_limit_switch` | Prevents upward movement beyond the upper limit |
+| `lower_limit_switch` | Prevents downward movement beyond the lower limit |
 
-## Control Logic Summary
+---
 
-The main controller function is:
+## Project Structure
+
+```text
+.
+├── elevator_controller.c    # Core elevator controller logic
+├── elevator_controller.h    # Controller states, data structures, and function declarations
+├── main.c                   # Terminal-based elevator simulator
+├── gui_simulator.c          # Graphical elevator simulator using raylib
+└── README.md                # Project documentation
+```
+
+---
+
+## Core Controller Design
+
+The controller is implemented as a modular firmware-style component. The main API functions are:
 
 ```c
+void Elevator_Init(ElevatorController *controller);
 void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs);
+void Elevator_PrintStatus(const ElevatorController *controller);
 ```
 
-This function performs the following operations:
+### `Elevator_Init`
 
-1. Checks emergency-stop input.
-2. Adds valid floor requests to the FIFO queue.
-3. Selects the next target floor.
-4. Checks upper and lower limit-switch protection.
-5. Updates the elevator state using a finite-state machine.
-6. Updates motor commands and door status.
+Initializes the elevator controller to a safe default condition:
 
-Emergency stop has the highest priority. If the emergency-stop input is active, the motor is immediately stopped and the elevator enters the `STATE_EMERGENCY_STOP` state.
+- Current floor: 1
+- Target floor: 1
+- State: `STATE_IDLE`
+- Motor: `MOTOR_STOP`
+- Door: closed
+- Request queue: empty
 
-## Request Queue
+### `Elevator_Update`
 
-The controller uses a simple FIFO queue to store floor requests. The request queue:
+Executes one controller update cycle. This function processes all input signals, updates the request queue, applies safety logic, and advances the finite-state machine.
 
-- Accepts only valid floor numbers
-- Rejects duplicate requests
-- Rejects new requests when the queue is full
-- Processes requests in the order they were received
+In the simulation, each update cycle moves the elevator by one floor when the motor is active.
 
-The queue size is defined as:
+### `Elevator_PrintStatus`
 
-```c
-#define REQUEST_QUEUE_SIZE MAX_FLOOR
-```
+Prints the current elevator status, including:
 
-For the current implementation, the system supports three floors, so the queue can hold up to three requests.
+- Current floor
+- Target floor
+- Controller state
+- Motor command
+- Door status
 
-## Build Instructions
+---
 
-### Requirements
+## Request Queue Logic
 
-To build and run this project, you need:
+The controller uses a FIFO request queue to store pending floor requests. Requests are accepted from:
 
-- GCC compiler
-- A terminal or command prompt
-- Optional: Visual Studio Code with C/C++ extension
+- Cabin request buttons
+- Hall UP request buttons
+- Hall DOWN request buttons
 
-### Compile on Windows, Linux, or macOS
+The queue logic includes:
 
-Run the following command from the project directory:
+- Floor range validation
+- Queue capacity checking
+- Duplicate request prevention
+- Automatic removal of served requests
+
+---
+
+## Terminal Simulation
+
+The terminal simulator allows users to manually enter elevator requests and safety inputs.
+
+### Compile Terminal Version
 
 ```bash
-gcc -Wall -Wextra -g main.c elevator_controller.c -o elevator_controller
+gcc -g main.c elevator_controller.c -o elevator_controller.exe
 ```
 
-On Windows, you may prefer to generate an executable with `.exe` extension:
+### Run Terminal Version
 
 ```bash
-gcc -Wall -Wextra -g main.c elevator_controller.c -o elevator_controller.exe
+./elevator_controller.exe
 ```
 
-## Run Instructions
-
-### Linux/macOS
-
-```bash
-./elevator_controller
-```
-
-### Windows
+On Windows Command Prompt or PowerShell, you can also run:
 
 ```bash
 elevator_controller.exe
 ```
 
-or, from PowerShell:
+### Terminal Inputs
 
-```powershell
-.\elevator_controller.exe
+During execution, the program asks for:
+
+- Cabin request floor
+- Hall UP request floor
+- Hall DOWN request floor
+- Door obstruction status
+- Emergency stop status
+- Upper limit switch status
+- Lower limit switch status
+
+Enter `0` when there is no floor request.
+
+---
+
+## GUI Simulation
+
+The GUI simulator provides a visual dashboard for the elevator system. It displays the elevator shaft, current floor, target floor, controller state, motor command, door status, and safety inputs.
+
+The GUI is implemented using raylib and keeps the embedded controller logic separated from the visualization layer.
+
+### GUI Features
+
+- Visual elevator shaft
+- Current floor indicator
+- Target floor highlight
+- Cabin movement visualization
+- Floor request buttons
+- Emergency stop button
+- Door obstruction toggle
+- Upper limit switch toggle
+- Lower limit switch toggle
+- Live display of state, motor, and door status
+
+---
+
+## Requirements
+
+### For Terminal Simulation
+
+- GCC compiler
+- C standard library
+
+### For GUI Simulation
+
+- GCC compiler
+- raylib
+- Windows/MSYS2 environment recommended for the provided build command
+
+---
+
+## Compile GUI Version on Windows/MSYS2
+
+After installing raylib, compile the GUI simulator using:
+
+```bash
+gcc gui_simulator.c elevator_controller.c -o gui_simulator.exe -lraylib -lopengl32 -lgdi32 -lwinmm
 ```
 
-## Example Program Output
+### Run GUI Version
+
+```bash
+./gui_simulator.exe
+```
+
+Or on Windows:
+
+```bash
+gui_simulator.exe
+```
+
+---
+
+## Example Usage
+
+### Terminal Simulation Example
 
 ```text
---------------------------------------
 Embedded Elevator Controller Simulation Started
---------------------------------------
-Valid floors: 1 to 3
-Enter 0 as requested floor for no new request.
-Enter emergency stop = 1 to trigger emergency stop.
-Press Ctrl+C to exit from simulation.
+Valid floors: 1 to 10
 
-Current Floor: 1 | Target Floor: 1 | State: IDLE | Motor: STOP | Door: CLOSED
-
-Enter requested floor 1 to 3, or 0 for no new request: 3
+Cabin request floor 1 to 10, or 0 for no cabin request: 5
+Hall UP request floor 1 to 10, or 0 for no hall UP request: 0
+Hall DOWN request floor 1 to 10, or 0 for no hall DOWN request: 0
 Door obstruction? 1=yes, 0=no: 0
 Emergency stop? 1=yes, 0=no: 0
 Upper limit switch active? 1=yes, 0=no: 0
 Lower limit switch active? 1=yes, 0=no: 0
-
-Updated controller status:
-Current Floor: 1 | Target Floor: 3 | State: MOVING_UP | Motor: UP | Door: CLOSED
---------------------------------------
 ```
 
-## Example Test Scenarios
+The controller then updates its state and moves the elevator toward the requested floor.
 
-You can manually test the controller using the terminal prompts.
+---
 
-### Scenario 1: Move from Floor 1 to Floor 3
+## Design Highlights
 
-1. Start the program.
-2. Enter requested floor `3`.
-3. Set all safety inputs to `0`.
-4. Continue entering `0` for no new request.
-5. Observe the elevator moving upward until it reaches floor 3.
+### 1. Modular Firmware-Style Architecture
 
-### Scenario 2: Emergency Stop
+The controller logic is implemented independently from the terminal and GUI interfaces. This makes the project easier to test, extend, and port to embedded hardware.
 
-1. Enter any valid floor request.
-2. Set emergency stop to `1`.
-3. The controller should immediately stop the motor and enter `STATE_EMERGENCY_STOP`.
+### 2. Finite-State Machine Control
 
-### Scenario 3: Door Obstruction
+The elevator behavior is modeled using explicit operating states. This improves readability and makes the controller behavior predictable.
 
-1. Request a floor.
-2. When the elevator reaches the target floor and opens the door, set door obstruction to `1`.
-3. The door should remain open while the obstruction is active.
+### 3. Safety-First Logic
 
-### Scenario 4: Limit Switch Protection
+Emergency stop has the highest priority and immediately disables motor movement. Limit switches prevent movement beyond valid floor boundaries, and door obstruction keeps the door open.
 
-1. Simulate upward movement.
-2. Activate the upper limit switch.
-3. The controller should stop upward movement.
-4. Simulate downward movement.
-5. Activate the lower limit switch.
-6. The controller should stop downward movement.
+### 4. GUI and Logic Separation
 
-## Embedded-Systems Relevance
+The GUI simulator only sends user input events to the controller. It does not directly modify the control behavior, which preserves the separation between application logic and visualization.
 
-Although this project runs as a terminal simulation, the controller structure is similar to embedded firmware. In a real microcontroller-based implementation:
-
-- Floor buttons would be read from GPIO inputs.
-- Door sensors and limit switches would be digital inputs.
-- Motor commands would be sent to a motor driver, relay circuit, or variable frequency drive interface.
-- `Elevator_Update()` would be called periodically inside a timed loop or real-time scheduler.
-- The terminal input section in `main.c` would be replaced by hardware input-reading functions.
+---
 
 ## Possible Future Improvements
 
-Potential extensions to this project include:
+- Add direction-aware request scheduling
+- Add separate cabin and hall request indicators
+- Add door opening and closing timers
+- Add acceleration and deceleration profiles
+- Add support for multiple elevators
+- Add unit tests for controller states and edge cases
+- Add hardware abstraction layer for GPIO-based deployment
+- Port the controller logic to an embedded board such as STM32, Arduino, or Raspberry Pi Pico
 
-- Add unit tests for each controller state.
-- Add timer-based door-open delay.
-- Add support for more floors.
-- Add priority scheduling instead of simple FIFO scheduling.
-- Add separate cabin and hall call requests.
-- Add overload sensor input.
-- Add maintenance mode.
-- Add hardware abstraction layer for GPIO-based implementation.
-- Add graphical simulation or serial-monitor interface.
-- Add integration with an RTOS task loop.
+---
+
+## Technologies Used
+
+- C programming language
+- GCC compiler
+- raylib graphics library
+- Finite-state machine design
+- Embedded control logic concepts
+
+---
+
+## Learning Objectives
+
+This project is useful for practicing:
+
+- Embedded C programming
+- State-machine implementation
+- Real-time control logic
+- Safety-critical input handling
+- Modular software design
+- GUI-based simulation of embedded systems
+- Separating firmware logic from visualization logic
+
+---
 
 ## Author
 
-**Mohammad Hafezan**
+Mohammad Hafezan
 
-GitHub Portfolio Project: Embedded Elevator Controller Simulation in C
+---
