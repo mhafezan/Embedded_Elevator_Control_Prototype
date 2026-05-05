@@ -4,32 +4,107 @@
 #include "elevator_controller.h"
 
 /*
- * GUI-based elevator simulator using raylib.
+ * Professional GUI-based elevator simulator using raylib.
  *
- * This file keeps the original elevator controller logic unchanged.
- * It only provides a graphical front-end for sending floor requests
- * and safety inputs to Elevator_Update().
+ * This GUI keeps the embedded controller logic separated from the visualization.
+ * The graphical interface only sends user events to Elevator_Update().
  *
- * Build example on Windows with raylib:
+ * Compile on Windows/MSYS2 after installing raylib:
  *   gcc gui_simulator.c elevator_controller.c -o gui_simulator.exe -lraylib -lopengl32 -lgdi32 -lwinmm
+ *
+ * Run:
+ *   ./gui_simulator.exe
  */
 
-#define WINDOW_WIDTH 900
-#define WINDOW_HEIGHT 720
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 820
 
-#define SHAFT_X 80
-#define SHAFT_Y 60
-#define SHAFT_WIDTH 300
-#define SHAFT_HEIGHT 600
+#define UPDATE_PERIOD_SECONDS 0.75f
 
-#define PANEL_X 450
+#define SHAFT_CARD_X 28
+#define SHAFT_CARD_Y 70
+#define SHAFT_CARD_W 405
+#define SHAFT_CARD_H 655
+
+#define SHAFT_X 145
+#define SHAFT_Y 90
+#define SHAFT_W 245
+#define SHAFT_H 605
+
+#define PANEL_X 460
 #define PANEL_Y 70
+#define PANEL_W 710
 
-#define BUTTON_WIDTH 70
-#define BUTTON_HEIGHT 38
-#define BUTTON_GAP 10
+#define BUTTON_W 92
+#define BUTTON_H 38
+#define BUTTON_GAP 12
 
-#define UPDATE_PERIOD_SECONDS 0.8f
+#define CONTROL_BUTTON_W 230
+#define CONTROL_BUTTON_H 46
+
+static const Color COLOR_BG = {245, 247, 251, 255};
+static const Color COLOR_CARD = {255, 255, 255, 255};
+static const Color COLOR_CARD_BORDER = {218, 225, 235, 255};
+static const Color COLOR_TEXT = {17, 35, 64, 255};
+static const Color COLOR_MUTED = {90, 105, 128, 255};
+static const Color COLOR_BLUE = {31, 105, 230, 255};
+static const Color COLOR_BLUE_DARK = {12, 58, 130, 255};
+static const Color COLOR_BLUE_LIGHT = {229, 239, 255, 255};
+static const Color COLOR_GREEN = {0, 135, 62, 255};
+static const Color COLOR_GREEN_LIGHT = {225, 247, 234, 255};
+static const Color COLOR_RED = {220, 30, 38, 255};
+static const Color COLOR_RED_LIGHT = {255, 232, 232, 255};
+static const Color COLOR_ORANGE = {245, 111, 30, 255};
+static const Color COLOR_ORANGE_LIGHT = {255, 239, 226, 255};
+static const Color COLOR_GRAY_LIGHT = {237, 241, 247, 255};
+static const Color COLOR_SHAFT = {238, 242, 247, 255};
+static const Color COLOR_SHAFT_LINE = {196, 205, 218, 255};
+
+static Font g_ui_font;
+
+/*
+ * raylib's default font is pixel-styled. For a smoother professional UI,
+ * this simulator tries to load Calibri from Windows. If it is not available,
+ * it safely falls back to raylib's default font.
+ */
+static void LoadUIFont(void)
+{
+    g_ui_font = LoadFontEx("C:/Windows/Fonts/calibri.ttf", 14, NULL, 0);
+
+    if (g_ui_font.texture.id == 0)
+    {
+        g_ui_font = LoadFontEx("C:/Windows/Fonts/arial.ttf", 14, NULL, 0);
+    }
+
+    if (g_ui_font.texture.id == 0)
+    {
+        g_ui_font = GetFontDefault();
+    }
+    else
+    {
+        SetTextureFilter(g_ui_font.texture, TEXTURE_FILTER_BILINEAR);
+    }
+}
+
+static void UnloadUIFont(void)
+{
+    if (g_ui_font.texture.id != GetFontDefault().texture.id)
+    {
+        UnloadFont(g_ui_font);
+    }
+}
+
+static void GuiDrawText(const char *text, int x, int y, int font_size, Color color)
+{
+    DrawTextEx(g_ui_font, text, (Vector2){(float)x, (float)y}, (float)font_size, 1.0f, color);
+}
+
+static int GuiMeasureText(const char *text, int font_size)
+{
+    Vector2 size = MeasureTextEx(g_ui_font, text, (float)font_size, 1.0f);
+    return (int)size.x;
+}
+
 
 static bool IsButtonClicked(Rectangle rect)
 {
@@ -37,115 +112,406 @@ static bool IsButtonClicked(Rectangle rect)
     return CheckCollisionPointRec(mouse, rect) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
 }
 
-static void DrawButton(Rectangle rect, const char *text)
+static bool IsButtonHovered(Rectangle rect)
 {
-    Vector2 mouse = GetMousePosition();
-    bool hover = CheckCollisionPointRec(mouse, rect);
+    return CheckCollisionPointRec(GetMousePosition(), rect);
+}
 
-    DrawRectangleRec(rect, hover ? LIGHTGRAY : RAYWHITE);
-    DrawRectangleLinesEx(rect, 2, DARKGRAY);
+static void DrawCard(Rectangle rect)
+{
+    DrawRectangleRounded((Rectangle){rect.x + 4, rect.y + 5, rect.width, rect.height}, 0.035f, 14, (Color){214, 222, 234, 80});
+    DrawRectangleRounded(rect, 0.035f, 14, COLOR_CARD);
+    DrawRectangleRoundedLines(rect, 0.035f, 14, COLOR_CARD_BORDER);
+}
 
-    int text_width = MeasureText(text, 18);
-    DrawText(text,
-             (int)(rect.x + rect.width / 2 - text_width / 2),
-             (int)(rect.y + rect.height / 2 - 9),
-             18,
-             BLACK);
+static void DrawSoftDivider(float x1, float y1, float x2, float y2)
+{
+    DrawLineEx((Vector2){x1, y1}, (Vector2){x2, y2}, 1.0f, COLOR_CARD_BORDER);
+}
+
+static void DrawTextRight(const char *text, int x, int y, int font_size, Color color)
+{
+    int w = GuiMeasureText(text, font_size);
+    GuiDrawText(text, x - w, y, font_size, color);
+}
+
+static void DrawCenteredText(const char *text, Rectangle rect, int font_size, Color color)
+{
+    int w = GuiMeasureText(text, font_size);
+    GuiDrawText(text,
+             (int)(rect.x + rect.width / 2 - w / 2),
+             (int)(rect.y + rect.height / 2 - font_size / 2),
+             font_size,
+             color);
+}
+
+static void DrawCircleBadge(int center_x, int center_y, int radius, Color fill, Color line)
+{
+    DrawCircle(center_x, center_y, (float)radius, fill);
+    DrawCircleLines(center_x, center_y, (float)radius, line);
+}
+
+static void DrawElevatorIcon(int x, int y, int size, Color color)
+{
+    Rectangle box = {(float)x, (float)y, (float)size, (float)size};
+    DrawRectangleRounded(box, 0.18f, 8, COLOR_BLUE_LIGHT);
+    DrawRectangleRoundedLines(box, 0.18f, 8, color);
+
+    DrawLine(x + size / 2, y + 9, x + size / 2, y + size - 9, color);
+
+    DrawCircle(x + size / 4, y + size / 2 - 5, size / 11.0f, color);
+    DrawRectangleRounded((Rectangle){x + size / 4 - 5, y + size / 2 + 4, 10, 16}, 0.4f, 6, color);
+
+    DrawCircle(x + 3 * size / 4, y + size / 2 - 5, size / 11.0f, color);
+    DrawRectangleRounded((Rectangle){x + 3 * size / 4 - 5, y + size / 2 + 4, 10, 16}, 0.4f, 6, color);
+
+    DrawTriangle((Vector2){x + size / 2 - 11, y - 9},
+                 (Vector2){x + size / 2 - 3, y - 22},
+                 (Vector2){x + size / 2 + 5, y - 9},
+                 color);
+    DrawTriangle((Vector2){x + size / 2 + 10, y - 22},
+                 (Vector2){x + size / 2 + 18, y - 9},
+                 (Vector2){x + size / 2 + 26, y - 22},
+                 color);
+}
+
+static void DrawShieldIcon(int x, int y, Color color)
+{
+    Vector2 pts[5] = {
+        {(float)x, (float)y},
+        {(float)x + 16, (float)y + 7},
+        {(float)x + 13, (float)y + 29},
+        {(float)x, (float)y + 38},
+        {(float)x - 13, (float)y + 29}};
+    DrawTriangle(pts[0], pts[1], pts[4], color);
+    DrawTriangle(pts[1], pts[2], pts[4], color);
+    DrawTriangle(pts[4], pts[2], pts[3], color);
+    DrawLineEx((Vector2){x - 5, y + 19}, (Vector2){x - 1, y + 24}, 3.0f, WHITE);
+    DrawLineEx((Vector2){x - 1, y + 24}, (Vector2){x + 8, y + 14}, 3.0f, WHITE);
+}
+
+static void DrawWarningIcon(int x, int y)
+{
+    DrawCircle(x, y, 20.0f, COLOR_RED_LIGHT);
+    DrawCircle(x, y, 15.0f, COLOR_RED);
+    DrawTriangle((Vector2){x, y - 10}, (Vector2){x - 11, y + 10}, (Vector2){x + 11, y + 10}, WHITE);
+    GuiDrawText("!", x - 3, y - 6, 15, COLOR_RED);
+}
+
+static void DrawDoorIcon(int x, int y, Color color)
+{
+    DrawCircle(x, y, 20.0f, COLOR_GRAY_LIGHT);
+    DrawRectangleLinesEx((Rectangle){x - 11, y - 15, 15, 30}, 3.0f, color);
+    DrawLineEx((Vector2){x, y - 15}, (Vector2){x, y + 15}, 2.0f, color);
+}
+
+static void DrawUpIcon(int x, int y, Color color)
+{
+    DrawCircle(x, y, 20.0f, COLOR_GRAY_LIGHT);
+    DrawLineEx((Vector2){x - 8, y + 6}, (Vector2){x, y - 4}, 3.0f, color);
+    DrawLineEx((Vector2){x, y - 4}, (Vector2){x + 8, y + 6}, 3.0f, color);
+    DrawLineEx((Vector2){x - 8, y - 6}, (Vector2){x, y - 16}, 3.0f, color);
+    DrawLineEx((Vector2){x, y - 16}, (Vector2){x + 8, y - 6}, 3.0f, color);
+}
+
+static void DrawDownIcon(int x, int y, Color color)
+{
+    DrawCircle(x, y, 20.0f, COLOR_GRAY_LIGHT);
+    DrawLineEx((Vector2){x - 8, y - 6}, (Vector2){x, y + 4}, 3.0f, color);
+    DrawLineEx((Vector2){x, y + 4}, (Vector2){x + 8, y - 6}, 3.0f, color);
+    DrawLineEx((Vector2){x - 8, y + 6}, (Vector2){x, y + 16}, 3.0f, color);
+    DrawLineEx((Vector2){x, y + 16}, (Vector2){x + 8, y + 6}, 3.0f, color);
+}
+
+static void DrawMetricRow(int icon_x,
+                          int y,
+                          Color badge_color,
+                          const char *label,
+                          const char *value,
+                          Color value_color)
+{
+    DrawCircleBadge(icon_x, y + 16, 21, badge_color, (Color){220, 226, 235, 255});
+    GuiDrawText(label, icon_x + 38, y + 3, 14, COLOR_TEXT);
+    GuiDrawText(value, icon_x + 215, y + 3, 15, value_color);
+}
+
+static void DrawRequestButton(Rectangle rect, const char *text, bool active)
+{
+    bool hover = IsButtonHovered(rect);
+
+    Color fill = active ? COLOR_BLUE : (hover ? COLOR_BLUE_LIGHT : WHITE);
+    Color border = active ? COLOR_BLUE_DARK : COLOR_BLUE;
+    Color text_color = active ? WHITE : COLOR_BLUE_DARK;
+
+    DrawRectangleRounded((Rectangle){rect.x + 2, rect.y + 3, rect.width, rect.height}, 0.12f, 12, (Color){160, 175, 200, 60});
+    DrawRectangleRounded(rect, 0.12f, 12, fill);
+    DrawRectangleRoundedLines(rect, 0.12f, 12, border);
+
+    DrawCenteredText(text, rect, 14, text_color);
+}
+
+static void DrawControlButton(Rectangle rect, const char *text, int type, bool active)
+{
+    bool hover = IsButtonHovered(rect);
+    Color fill = active ? COLOR_RED_LIGHT : (hover ? COLOR_GRAY_LIGHT : WHITE);
+    Color border = active ? COLOR_RED : (Color){185, 197, 213, 255};
+
+    DrawRectangleRounded((Rectangle){rect.x + 2, rect.y + 3, rect.width, rect.height}, 0.12f, 12, (Color){160, 175, 200, 45});
+    DrawRectangleRounded(rect, 0.12f, 12, fill);
+    DrawRectangleRoundedLines(rect, 0.12f, 12, border);
+
+    int icon_x = (int)rect.x + 36;
+    int icon_y = (int)rect.y + 28;
+
+    if (type == 0)
+        DrawWarningIcon(icon_x, icon_y);
+    else if (type == 1)
+        DrawDoorIcon(icon_x, icon_y, COLOR_MUTED);
+    else if (type == 2)
+        DrawUpIcon(icon_x, icon_y, COLOR_TEXT);
+    else
+        DrawDownIcon(icon_x, icon_y, COLOR_TEXT);
+
+    GuiDrawText(text, (int)rect.x + 78, (int)rect.y + 18, 14, COLOR_TEXT);
 }
 
 static void DrawElevatorShaft(const ElevatorController *controller)
 {
-    int floor_count = MAX_FLOOR - MIN_FLOOR + 1;
-    float floor_height = (float)SHAFT_HEIGHT / floor_count;
+    DrawCard((Rectangle){SHAFT_CARD_X, SHAFT_CARD_Y, SHAFT_CARD_W, SHAFT_CARD_H});
 
-    DrawRectangleLines(SHAFT_X, SHAFT_Y, SHAFT_WIDTH, SHAFT_HEIGHT, BLACK);
+    DrawRectangleRounded((Rectangle){SHAFT_X - 20, SHAFT_Y - 12, SHAFT_W + 40, SHAFT_H + 24}, 0.035f, 14, (Color){232, 237, 245, 255});
+    DrawRectangleRoundedLines((Rectangle){SHAFT_X - 20, SHAFT_Y - 12, SHAFT_W + 40, SHAFT_H + 24}, 0.035f, 14, COLOR_CARD_BORDER);
+
+    DrawRectangleGradientV(SHAFT_X, SHAFT_Y, SHAFT_W, SHAFT_H, (Color){250, 252, 255, 255}, COLOR_SHAFT);
+    DrawRectangleLinesEx((Rectangle){SHAFT_X, SHAFT_Y, SHAFT_W, SHAFT_H}, 2.0f, (Color){80, 96, 115, 255});
+
+    /* Elevator guide rails */
+    DrawRectangle(SHAFT_X + 5, SHAFT_Y, 7, SHAFT_H, (Color){46, 57, 73, 255});
+    DrawRectangle(SHAFT_X + 16, SHAFT_Y, 3, SHAFT_H, (Color){150, 160, 172, 255});
+    DrawRectangle(SHAFT_X + SHAFT_W - 12, SHAFT_Y, 7, SHAFT_H, (Color){46, 57, 73, 255});
+    DrawRectangle(SHAFT_X + SHAFT_W - 19, SHAFT_Y, 3, SHAFT_H, (Color){150, 160, 172, 255});
+
+    int floor_count = MAX_FLOOR - MIN_FLOOR + 1;
+    float floor_h = (float)SHAFT_H / floor_count;
 
     for (int floor = MIN_FLOOR; floor <= MAX_FLOOR; floor++)
     {
         int visual_index = MAX_FLOOR - floor;
-        float y = SHAFT_Y + visual_index * floor_height;
+        float y = SHAFT_Y + visual_index * floor_h;
 
-        DrawLine(SHAFT_X, (int)y, SHAFT_X + SHAFT_WIDTH, (int)y, LIGHTGRAY);
+        DrawLine(SHAFT_X, (int)y, SHAFT_X + SHAFT_W, (int)y, COLOR_SHAFT_LINE);
 
-        char floor_label[32];
-        snprintf(floor_label, sizeof(floor_label), "Floor %d", floor);
+        char label[32];
+        snprintf(label, sizeof(label), "Floor %d", floor);
 
-        DrawText(floor_label, SHAFT_X - 70, (int)(y + floor_height / 2 - 10), 18, DARKGRAY);
+        Color label_color = (floor == controller->current_floor) ? COLOR_BLUE : COLOR_TEXT;
+        DrawTextRight(label, SHAFT_X - 28, (int)(y + floor_h / 2 - 10), 14, label_color);
+
+        DrawLineEx((Vector2){SHAFT_X - 16, y + floor_h / 2},
+                   (Vector2){SHAFT_X - 2, y + floor_h / 2},
+                   2.0f,
+                   label_color);
 
         if (floor == controller->target_floor)
         {
-            DrawRectangleLinesEx(
-                (Rectangle){SHAFT_X + 5, y + 5, SHAFT_WIDTH - 10, floor_height - 10},
-                3,
-                ORANGE);
+            DrawRectangleRoundedLines((Rectangle){SHAFT_X + 22, y + 7, SHAFT_W - 44, floor_h - 14},
+                                      0.08f,
+                                      12,
+                                      COLOR_ORANGE);
         }
 
         if (floor == controller->current_floor)
         {
-            Rectangle elevator = {
-                SHAFT_X + 55,
-                y + 8,
-                SHAFT_WIDTH - 110,
-                floor_height - 16};
+            Rectangle cabin = {SHAFT_X + 36, y + 9, SHAFT_W - 72, floor_h - 18};
 
-            DrawRectangleRec(elevator, SKYBLUE);
-            DrawRectangleLinesEx(elevator, 3, BLUE);
+            DrawRectangleRounded((Rectangle){cabin.x + 3, cabin.y + 4, cabin.width, cabin.height}, 0.035f, 10, (Color){40, 60, 100, 90});
+            DrawRectangleGradientV((int)cabin.x, (int)cabin.y, (int)cabin.width, (int)cabin.height, (Color){63, 169, 245, 255}, COLOR_BLUE);
+            DrawRectangleRoundedLines(cabin, 0.035f, 10, COLOR_BLUE_DARK);
 
             if (controller->door_open)
             {
-                DrawLine((int)(elevator.x + elevator.width / 2),
-                         (int)elevator.y,
-                         (int)(elevator.x + elevator.width / 2),
-                         (int)(elevator.y + elevator.height),
-                         DARKBLUE);
-
-                DrawText("OPEN",
-                         (int)(elevator.x + elevator.width / 2 - 25),
-                         (int)(elevator.y + elevator.height / 2 - 10),
-                         18,
-                         DARKBLUE);
+                DrawLineEx((Vector2){cabin.x + cabin.width / 2, cabin.y + 5},
+                        (Vector2){cabin.x + cabin.width / 2, cabin.y + cabin.height - 5},
+                        3.0f,
+                        WHITE);
+                DrawCenteredText("DOOR OPEN", cabin, 14, WHITE);
             }
             else
             {
-                DrawText("CABIN",
-                         (int)(elevator.x + elevator.width / 2 - 30),
-                         (int)(elevator.y + elevator.height / 2 - 10),
-                         18,
-                         DARKBLUE);
+                DrawCenteredText("CABIN", cabin, 14, WHITE);
             }
         }
     }
 
-    DrawLine(SHAFT_X, SHAFT_Y + SHAFT_HEIGHT, SHAFT_X + SHAFT_WIDTH, SHAFT_Y + SHAFT_HEIGHT, LIGHTGRAY);
+    DrawLine(SHAFT_X, SHAFT_Y + SHAFT_H, SHAFT_X + SHAFT_W, SHAFT_Y + SHAFT_H, COLOR_SHAFT_LINE);
 }
 
-static void DrawStatusPanel(const ElevatorController *controller,
-                            bool emergency_stop,
-                            bool door_obstruction,
-                            bool upper_limit_switch,
-                            bool lower_limit_switch)
+static void DrawHeader(void)
 {
-    DrawText("Elevator GUI Simulator", PANEL_X, 30, 28, BLACK);
+    DrawElevatorIcon(PANEL_X + 30, PANEL_Y + 30, 52, COLOR_BLUE_DARK);
+    GuiDrawText("Elevator GUI Simulator", PANEL_X + 105, PANEL_Y + 27, 30, COLOR_TEXT);
+    GuiDrawText("Embedded controller visualization dashboard", PANEL_X + 108, PANEL_Y + 72, 15, COLOR_MUTED);
+}
 
-    DrawText(TextFormat("Current Floor: %d", controller->current_floor), PANEL_X, PANEL_Y, 22, BLACK);
-    DrawText(TextFormat("Target Floor:  %d", controller->target_floor), PANEL_X, PANEL_Y + 35, 22, BLACK);
-    DrawText(TextFormat("State: %s", Elevator_StateToString(controller->state)), PANEL_X, PANEL_Y + 70, 22, BLACK);
-    DrawText(TextFormat("Motor: %s", Elevator_MotorToString(controller->motor)), PANEL_X, PANEL_Y + 105, 22, BLACK);
-    DrawText(TextFormat("Door: %s", controller->door_open ? "OPEN" : "CLOSED"), PANEL_X, PANEL_Y + 140, 22, BLACK);
+static void DrawStatusCard(const ElevatorController *controller)
+{
+    Rectangle card = {PANEL_X, PANEL_Y, PANEL_W, 250};
+    DrawCard(card);
+    DrawHeader();
 
-    DrawText("Safety Inputs", PANEL_X, PANEL_Y + 200, 24, BLACK);
+    Rectangle metrics = {PANEL_X + 24, PANEL_Y + 112, PANEL_W - 48, 105};
+    DrawRectangleRounded(metrics, 0.04f, 12, (Color){250, 252, 255, 255});
+    DrawRectangleRoundedLines(metrics, 0.04f, 12, COLOR_CARD_BORDER);
 
-    DrawText(TextFormat("Emergency Stop: %s", emergency_stop ? "ACTIVE" : "OFF"),
-             PANEL_X, PANEL_Y + 240, 20, emergency_stop ? RED : DARKGREEN);
+    DrawMetricRow(PANEL_X + 55, PANEL_Y + 132, COLOR_BLUE_LIGHT, "Current Floor:", TextFormat("%d", controller->current_floor), COLOR_BLUE);
+    DrawMetricRow(PANEL_X + 55, PANEL_Y + 177, COLOR_ORANGE_LIGHT, "Target Floor:", TextFormat("%d", controller->target_floor), COLOR_ORANGE);
 
-    DrawText(TextFormat("Door Obstruction: %s", door_obstruction ? "ACTIVE" : "OFF"),
-             PANEL_X, PANEL_Y + 270, 20, door_obstruction ? RED : DARKGREEN);
+    DrawSoftDivider(PANEL_X + 352, PANEL_Y + 124, PANEL_X + 352, PANEL_Y + 210);
 
-    DrawText(TextFormat("Upper Limit: %s", upper_limit_switch ? "ACTIVE" : "OFF"),
-             PANEL_X, PANEL_Y + 300, 20, upper_limit_switch ? RED : DARKGREEN);
+    GuiDrawText("State:", PANEL_X + 382, PANEL_Y + 136, 14, COLOR_TEXT);
+    GuiDrawText(Elevator_StateToString(controller->state), PANEL_X + 520, PANEL_Y + 136, 15, COLOR_BLUE_DARK);
 
-    DrawText(TextFormat("Lower Limit: %s", lower_limit_switch ? "ACTIVE" : "OFF"),
-             PANEL_X, PANEL_Y + 330, 20, lower_limit_switch ? RED : DARKGREEN);
+    GuiDrawText("Motor:", PANEL_X + 382, PANEL_Y + 172, 14, COLOR_TEXT);
+    GuiDrawText(Elevator_MotorToString(controller->motor),
+             PANEL_X + 520,
+             PANEL_Y + 172,
+             22,
+             controller->motor == MOTOR_STOP ? COLOR_RED : COLOR_GREEN);
+
+    GuiDrawText("Door:", PANEL_X + 382, PANEL_Y + 208, 14, COLOR_TEXT);
+    GuiDrawText(controller->door_open ? "OPEN" : "CLOSED",
+             PANEL_X + 520,
+             PANEL_Y + 208,
+             22,
+             controller->door_open ? COLOR_ORANGE : COLOR_GREEN);
+}
+
+static void DrawSafetyCard(bool emergency_stop,
+                           bool door_obstruction,
+                           bool upper_limit_switch,
+                           bool lower_limit_switch)
+{
+    Rectangle card = {PANEL_X, PANEL_Y + 272, PANEL_W, 118};
+    DrawCard(card);
+
+    DrawShieldIcon(PANEL_X + 38, PANEL_Y + 298, COLOR_BLUE_DARK);
+    GuiDrawText("Safety Inputs", PANEL_X + 70, PANEL_Y + 300, 14, COLOR_TEXT);
+
+    const char *labels[4] = {"Emergency Stop", "Door Obstruction", "Upper Limit", "Lower Limit"};
+    bool values[4] = {emergency_stop, door_obstruction, upper_limit_switch, lower_limit_switch};
+
+    for (int i = 0; i < 4; i++)
+    {
+        int x = PANEL_X + 35 + i * 168;
+        int y = PANEL_Y + 345;
+
+        DrawShieldIcon(x + 14, y, values[i] ? COLOR_RED : COLOR_GREEN);
+        GuiDrawText(labels[i], x + 40, y + 1, 14, COLOR_TEXT);
+        GuiDrawText(values[i] ? "ACTIVE" : "OFF", x + 40, y + 27, 15, values[i] ? COLOR_RED : COLOR_GREEN);
+
+        if (i < 3)
+            DrawSoftDivider(x + 155, y, x + 155, y + 45);
+    }
+}
+
+static void DrawFloorButtons(int *pending_request_floor)
+{
+    Rectangle card = {PANEL_X, PANEL_Y + 408, 410, 255};
+    DrawCard(card);
+
+    GuiDrawText("Floor Request Buttons", PANEL_X + 52, PANEL_Y + 430, 14, COLOR_TEXT);
+
+    for (int i = 0; i < 4; i++)
+    {
+        int dot_x = PANEL_X + 25 + (i % 2) * 12;
+        int dot_y = PANEL_Y + 433 + (i / 2) * 12;
+        DrawRectangleRounded((Rectangle){dot_x, dot_y, 8, 8}, 0.3f, 4, COLOR_BLUE_DARK);
+    }
+
+    int max_buttons_per_row = 3;
+    int start_x = PANEL_X + 28;
+    int start_y = PANEL_Y + 472;
+
+    for (int floor = MIN_FLOOR; floor <= MAX_FLOOR; floor++)
+    {
+        int index = floor - MIN_FLOOR;
+        int col = index % max_buttons_per_row;
+        int row = index / max_buttons_per_row;
+
+        Rectangle btn = {
+            start_x + col * (BUTTON_W + BUTTON_GAP),
+            start_y + row * (BUTTON_H + BUTTON_GAP),
+            BUTTON_W,
+            BUTTON_H};
+
+        if (MAX_FLOOR == 10 && floor == 10)
+        {
+            btn.x = start_x + BUTTON_W + BUTTON_GAP;
+        }
+
+        bool active = (*pending_request_floor == floor);
+        DrawRequestButton(btn, TextFormat("%d", floor), active);
+
+        if (IsButtonClicked(btn))
+            *pending_request_floor = floor;
+    }
+}
+
+static void DrawActionButtons(bool *emergency_stop,
+                              bool *door_obstruction,
+                              bool *upper_limit_switch,
+                              bool *lower_limit_switch)
+{
+    Rectangle card = {PANEL_X + 430, PANEL_Y + 408, 280, 255};
+    DrawCard(card);
+
+    Rectangle e = {PANEL_X + 448, PANEL_Y + 430, CONTROL_BUTTON_W, CONTROL_BUTTON_H};
+    Rectangle d = {PANEL_X + 448, PANEL_Y + 492, CONTROL_BUTTON_W, CONTROL_BUTTON_H};
+    Rectangle u = {PANEL_X + 448, PANEL_Y + 554, CONTROL_BUTTON_W, CONTROL_BUTTON_H};
+    Rectangle l = {PANEL_X + 448, PANEL_Y + 616, CONTROL_BUTTON_W, CONTROL_BUTTON_H};
+
+    DrawControlButton(e, *emergency_stop ? "Clear Emergency" : "Emergency Stop", 0, *emergency_stop);
+    DrawControlButton(d, *door_obstruction ? "Clear Obstruction" : "Door Obstruction", 1, *door_obstruction);
+    DrawControlButton(u, *upper_limit_switch ? "Clear Upper Limit" : "Upper Limit", 2, *upper_limit_switch);
+    DrawControlButton(l, *lower_limit_switch ? "Clear Lower Limit" : "Lower Limit", 3, *lower_limit_switch);
+
+    if (IsButtonClicked(e))
+        *emergency_stop = !(*emergency_stop);
+
+    if (IsButtonClicked(d))
+        *door_obstruction = !(*door_obstruction);
+
+    if (IsButtonClicked(u))
+        *upper_limit_switch = !(*upper_limit_switch);
+
+    if (IsButtonClicked(l))
+        *lower_limit_switch = !(*lower_limit_switch);
+}
+
+static void DrawFooter(int pending_request_floor)
+{
+    Rectangle footer = {28, 750, 1144, 52};
+    DrawCard(footer);
+
+    DrawCircle(60, 776, 17.0f, COLOR_BLUE);
+    GuiDrawText("i", 56, 765, 21, WHITE);
+
+    if (pending_request_floor != 0)
+    {
+        GuiDrawText(TextFormat("Pending request: Floor %d will be sent on the next controller cycle.", pending_request_floor),
+                 92,
+                 766,
+                 20,
+                 COLOR_ORANGE);
+    }
+    else
+    {
+        GuiDrawText("Click a floor button to send a request. Toggle safety buttons to simulate sensor conditions.",
+                 92,
+                 766,
+                 20,
+                 COLOR_MUTED);
+    }
 }
 
 int main(void)
@@ -164,62 +530,24 @@ int main(void)
     Elevator_Init(&controller);
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Embedded Elevator Controller - GUI Simulation");
+    LoadUIFont();
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {
         update_timer += GetFrameTime();
 
-        /*
-         * Floor request buttons.
-         * This GUI version sends one pending floor request to the controller.
-         */
-        int button_start_y = PANEL_Y + 390;
-
-        for (int floor = MIN_FLOOR; floor <= MAX_FLOOR; floor++)
-        {
-            int index = floor - MIN_FLOOR;
-            int col = index % 3;
-            int row = index / 3;
-
-            Rectangle floor_button = {
-                PANEL_X + col * (BUTTON_WIDTH + BUTTON_GAP),
-                button_start_y + row * (BUTTON_HEIGHT + BUTTON_GAP),
-                BUTTON_WIDTH,
-                BUTTON_HEIGHT};
-
-            if (IsButtonClicked(floor_button))
-            {
-                pending_request_floor = floor;
-            }
-        }
-
-        Rectangle emergency_button = {PANEL_X + 320, button_start_y, 170, BUTTON_HEIGHT};
-        Rectangle obstruction_button = {PANEL_X + 320, button_start_y + 50, 170, BUTTON_HEIGHT};
-        Rectangle upper_limit_button = {PANEL_X + 320, button_start_y + 100, 170, BUTTON_HEIGHT};
-        Rectangle lower_limit_button = {PANEL_X + 320, button_start_y + 150, 170, BUTTON_HEIGHT};
-
-        if (IsButtonClicked(emergency_button))
-            emergency_stop = !emergency_stop;
-
-        if (IsButtonClicked(obstruction_button))
-            door_obstruction = !door_obstruction;
-
-        if (IsButtonClicked(upper_limit_button))
-            upper_limit_switch = !upper_limit_switch;
-
-        if (IsButtonClicked(lower_limit_button))
-            lower_limit_switch = !lower_limit_switch;
-
-        /*
-         * Periodic controller update.
-         * This simulates a real embedded control loop.
-         */
         if (update_timer >= UPDATE_PERIOD_SECONDS)
         {
+            /*
+             * This version matches the improved controller structure:
+             * a GUI floor click is treated as a cabin request.
+             * Hall UP/DOWN requests are not used in this GUI yet.
+             */
             inputs.cabin_request_floor = pending_request_floor;
             inputs.hall_up_request_floor = 0;
             inputs.hall_down_request_floor = 0;
+
             inputs.door_obstruction = door_obstruction;
             inputs.emergency_stop = emergency_stop;
             inputs.upper_limit_switch = upper_limit_switch;
@@ -232,57 +560,20 @@ int main(void)
         }
 
         BeginDrawing();
-        ClearBackground(RAYWHITE);
+
+        ClearBackground(COLOR_BG);
 
         DrawElevatorShaft(&controller);
-        DrawStatusPanel(&controller,
-                        emergency_stop,
-                        door_obstruction,
-                        upper_limit_switch,
-                        lower_limit_switch);
-
-        DrawText("Floor Request Buttons", PANEL_X, button_start_y - 35, 22, BLACK);
-
-        for (int floor = MIN_FLOOR; floor <= MAX_FLOOR; floor++)
-        {
-            int index = floor - MIN_FLOOR;
-            int col = index % 3;
-            int row = index / 3;
-
-            Rectangle floor_button = {
-                PANEL_X + col * (BUTTON_WIDTH + BUTTON_GAP),
-                button_start_y + row * (BUTTON_HEIGHT + BUTTON_GAP),
-                BUTTON_WIDTH,
-                BUTTON_HEIGHT};
-
-            DrawButton(floor_button, TextFormat("%d", floor));
-        }
-
-        DrawButton(emergency_button, emergency_stop ? "Clear E-Stop" : "Emergency");
-        DrawButton(obstruction_button, door_obstruction ? "Clear Door Obs." : "Door Obs.");
-        DrawButton(upper_limit_button, upper_limit_switch ? "Clear Upper" : "Upper Limit");
-        DrawButton(lower_limit_button, lower_limit_switch ? "Clear Lower" : "Lower Limit");
-
-        if (pending_request_floor != 0)
-        {
-            DrawText(TextFormat("Pending request: Floor %d", pending_request_floor),
-                     PANEL_X,
-                     WINDOW_HEIGHT - 40,
-                     22,
-                     ORANGE);
-        }
-        else
-        {
-            DrawText("Click a floor button to send a request.",
-                     PANEL_X,
-                     WINDOW_HEIGHT - 40,
-                     22,
-                     DARKGRAY);
-        }
+        DrawStatusCard(&controller);
+        DrawSafetyCard(emergency_stop, door_obstruction, upper_limit_switch, lower_limit_switch);
+        DrawFloorButtons(&pending_request_floor);
+        DrawActionButtons(&emergency_stop, &door_obstruction, &upper_limit_switch, &lower_limit_switch);
+        DrawFooter(pending_request_floor);
 
         EndDrawing();
     }
 
+    UnloadUIFont();
     CloseWindow();
     return 0;
 }

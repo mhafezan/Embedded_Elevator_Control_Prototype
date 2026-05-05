@@ -197,25 +197,36 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
     switch (controller->state)
     {
     case STATE_IDLE:
-        controller->door_open = false;
-        controller->motor = MOTOR_STOP;
+    controller->door_open = false;
+    controller->motor = MOTOR_STOP;
 
-        if (controller->target_floor > controller->current_floor)
-        {
-            controller->state = STATE_MOVING_UP;
-            controller->motor = MOTOR_UP;
-        }
-        else if (controller->target_floor < controller->current_floor)
-        {
-            controller->state = STATE_MOVING_DOWN;
-            controller->motor = MOTOR_DOWN;
-        }
-        else
-        {
-            controller->state = STATE_DOOR_OPEN;
-            controller->door_open = true;
-        }
+    /* If there is no pending request, remain idle. Do not open the door only because current_floor == target_floor. */
+
+    if (Elevator_IsQueueEmpty(controller))
+    {
+        controller->target_floor = controller->current_floor;
+        controller->state = STATE_IDLE;
         break;
+    }
+
+    if (controller->target_floor > controller->current_floor)
+    {
+        controller->state = STATE_MOVING_UP;
+        controller->motor = MOTOR_UP;
+    }
+    else if (controller->target_floor < controller->current_floor)
+    {
+        controller->state = STATE_MOVING_DOWN;
+        controller->motor = MOTOR_DOWN;
+    }
+    else
+    {
+        /*Open the door only when there is an actual pending request for the current floor.*/
+
+        controller->state = STATE_DOOR_OPEN;
+        controller->door_open = true;
+    }
+    break;
 
     case STATE_MOVING_UP:
         controller->door_open = false;
@@ -258,25 +269,42 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         break;
 
     case STATE_DOOR_OPEN:
-        controller->motor = MOTOR_STOP;
-        controller->door_open = true;
+    controller->motor = MOTOR_STOP;
+    controller->door_open = true;
 
-        if (inputs.door_obstruction)
+    if (inputs.door_obstruction)
+    {
+        /*
+         * Keep the door open while an obstruction is detected.
+         */
+        controller->door_open = true;
+    }
+    else
+    {
+        /*
+         * Remove the served request from the queue.
+         */
+        if (!Elevator_IsQueueEmpty(controller) &&
+            controller->current_floor == controller->request_queue[0])
         {
-            controller->door_open = true;
+            Elevator_DequeueRequest(controller);
+        }
+
+        controller->door_open = false;
+
+        if (Elevator_IsQueueEmpty(controller))
+        {
+            controller->target_floor = controller->current_floor;
         }
         else
         {
-            if (!Elevator_IsQueueEmpty(controller) &&
-                controller->current_floor == controller->request_queue[0])
-            {
-                Elevator_DequeueRequest(controller);
-            }
-
-            controller->door_open = false;
-            controller->state = STATE_IDLE;
+            controller->target_floor = controller->request_queue[0];
         }
-        break;
+
+        controller->state = STATE_IDLE;
+    }
+    break;
+    
     case STATE_EMERGENCY_STOP:
         controller->motor = MOTOR_STOP;
         controller->door_open = false;

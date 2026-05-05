@@ -77,8 +77,11 @@ int main(void)
 }
 
 /***
-    
-    With GUI:
+* To compile and run the terminal simulation, use the following command in the terminal:
+    gcc -g main.c elevator_controller.c -o elevator_controller.exe
+    elevator_controller.exe
+
+* To compile and run the GUI simulation, use the following commands in the terminal:
     gcc gui_simulator.c elevator_controller.c -o gui_simulator.exe -lraylib -lopengl32 -lgdi32 -lwinmm
-    ./gui_simulator.exe
+    gui_simulator.exe
  ***/
