@@ -75,3 +75,10 @@ int main(void)
 
     return 0;
 }
+
+/***
+    
+    With GUI:
+    gcc gui_simulator.c elevator_controller.c -o gui_simulator.exe -lraylib -lopengl32 -lgdi32 -lwinmm
+    ./gui_simulator.exe
+ ***/
