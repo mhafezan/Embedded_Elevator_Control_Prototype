@@ -5190,7 +5190,7 @@
 	(footprint "Relay_THT:Relay_SPDT_SANYOU_SRD_Series_Form_C"
 		(layer "F.Cu")
 		(uuid "72fb2628-5ecb-415f-baa1-111526a7c1d6")
-		(at 144.592 164.5506)
+		(at 144.7858 164.5364)
 		(descr "relay Sanyou SRD series Form C http://www.sanyourelay.ca/public/products/pdf/SRD.pdf")
 		(tags "relay Sanyu SRD form C")
 		(property "Reference" "K1"
