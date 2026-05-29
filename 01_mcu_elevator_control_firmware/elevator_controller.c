@@ -131,6 +131,14 @@ static void Elevator_DequeueRequest(ElevatorController *controller)
  */
 void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
 {
+    bool has_measured_floor = inputs.measured_floor >= MIN_FLOOR &&
+                              inputs.measured_floor <= MAX_FLOOR;
+
+    if (has_measured_floor)
+    {
+        controller->current_floor = inputs.measured_floor;
+    }
+
     /*
      * Emergency stop has the highest priority.
      * Any emergency stop immediately disables motor movement.
@@ -235,7 +243,7 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         /*
          * In this simplified simulation, each update cycle moves one floor.
          */
-        if (controller->current_floor < MAX_FLOOR)
+        if (!has_measured_floor && controller->current_floor < MAX_FLOOR)
         {
             controller->current_floor++;
         }
@@ -255,7 +263,7 @@ void Elevator_Update(ElevatorController *controller, ElevatorInputs inputs)
         /*
          * In this simplified simulation, each update cycle moves one floor.
          */
-        if (controller->current_floor > MIN_FLOOR)
+        if (!has_measured_floor && controller->current_floor > MIN_FLOOR)
         {
             controller->current_floor--;
         }

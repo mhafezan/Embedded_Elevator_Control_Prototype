@@ -39,6 +39,12 @@ typedef struct
     bool emergency_stop;
     bool upper_limit_switch;
     bool lower_limit_switch;
+
+    /*
+     * Optional hardware floor feedback. Set to 0 when no real floor sensor is
+     * available; simulation code will then advance one floor per update cycle.
+     */
+    int measured_floor;
 } ElevatorInputs;
 
 typedef struct

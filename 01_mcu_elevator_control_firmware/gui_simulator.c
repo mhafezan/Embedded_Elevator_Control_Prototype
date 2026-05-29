@@ -552,6 +552,7 @@ int main(void)
             inputs.emergency_stop = emergency_stop;
             inputs.upper_limit_switch = upper_limit_switch;
             inputs.lower_limit_switch = lower_limit_switch;
+            inputs.measured_floor = 0;
 
             Elevator_Update(&controller, inputs);
 

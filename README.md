@@ -78,6 +78,10 @@ The controller supports the following safety-related inputs:
 ├── elevator_controller.h    # Controller states, data structures, and function declarations
 ├── main.c                   # Terminal-based elevator simulator
 ├── gui_simulator.c          # Graphical elevator simulator using raylib
+├── stm32_main.c             # STM32 firmware entry-point scaffold
+├── stm32_gpio_config.h      # STM32 pin mapping and GPIO configuration API
+├── stm32_gpio_config.c      # STM32 GPIO debounce, input, and safe output layer
+├── STM32_HARDWARE_PORTING.md # STM32 hardware integration checklist
 └── README.md                # Project documentation
 ```
 
@@ -273,6 +277,15 @@ Emergency stop has the highest priority and immediately disables motor movement.
 ### 4. GUI and Logic Separation
 
 The GUI simulator only sends user input events to the controller. It does not directly modify the control behavior, which preserves the separation between application logic and visualization.
+
+---
+
+
+## STM32 Hardware Firmware
+
+The repository includes an STM32-oriented firmware scaffold that connects the shared elevator controller to GPIO inputs and outputs. The STM32 layer now separates board-specific GPIO configuration into `stm32_gpio_config.h` and `stm32_gpio_config.c`, debounces inputs, uses active-low pull-up button logic, supports optional floor-position sensors, and applies safe motor-output interlocking before driving motor direction pins.
+
+This firmware must still be imported into a STM32CubeIDE project generated for the exact target MCU and board. Before flashing real hardware, replace the example clock configuration with the CubeMX-generated `SystemClock_Config`, verify every pin against the schematic, use external motor/door driver hardware, and wire emergency stop and final limit switches into a hardware safety path. See `01_mcu_elevator_control_firmware/STM32_HARDWARE_PORTING.md` for the full checklist.
 
 ---
 
