@@ -39,6 +39,7 @@ int main(void)
         inputs.emergency_stop = false;
         inputs.upper_limit_switch = false;
         inputs.lower_limit_switch = false;
+        inputs.measured_floor = 0;
 
         Elevator_PrintStatus(&controller);
 

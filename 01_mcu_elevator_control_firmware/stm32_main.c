@@ -1,338 +1,157 @@
 /**
  * @file stm32_main.c
- * @brief STM32 Elevator Controller Firmware
+ * @brief STM32 Elevator Controller Firmware Entry Point
  *
- * This firmware runs on an STM32 microcontroller and reads floor request buttons
- * and safety inputs from GPIO pins. The elevator controller logic is updated
- * periodically in the main loop, and motor commands are sent to output pins.
+ * This file shows how to run the shared elevator controller on STM32 hardware.
+ * It keeps interrupt work short, samples/debounces GPIO every millisecond, runs
+ * the controller at a deterministic interval, and sends safe motor/door commands
+ * through the board abstraction in stm32_gpio_config.c.
  *
- * Hardware Configuration (STM32F4xx/STM32H7xx):
- * ===============================================
- * CABIN REQUEST BUTTONS (10 Floors):
- *   PA0  - Floor 1 button  (Cabin Request)
- *   PA1  - Floor 2 button  (Cabin Request)
- *   PA2  - Floor 3 button  (Cabin Request)
- *   PA3  - Floor 4 button  (Cabin Request)
- *   PA4  - Floor 5 button  (Cabin Request)
- *   PA5  - Floor 6 button  (Cabin Request)
- *   PA6  - Floor 7 button  (Cabin Request)
- *   PA7  - Floor 8 button  (Cabin Request)
- *   PB0  - Floor 9 button  (Cabin Request)
- *   PB1  - Floor 10 button (Cabin Request)
+ * Hardware profile used by the default configuration:
+ * - Cabin request buttons: PA0-PA7, PB0-PB1, active-low with pull-ups
+ * - Safety inputs: PC0-PC3, active-low fail-safe wiring with pull-ups
+ * - Motor/door command outputs: PD0-PD2, active-high logic-level commands
+ * - Hall request shortcut inputs: PE0 and PE1, active-low with pull-ups
+ * - Optional floor sensors: GPIOF pins, disabled by default
  *
- * SAFETY INPUTS:
- *   PC0  - Emergency Stop Button      (Active High: 1 = Emergency)
- *   PC1  - Door Obstruction Sensor    (Active High: 1 = Obstructed)
- *   PC2  - Upper Limit Switch         (Active High: 1 = At Top)
- *   PC3  - Lower Limit Switch         (Active High: 1 = At Bottom)
- *
- * MOTOR CONTROL OUTPUTS:
- *   PD0  - Motor UP    Control   (GPIO Output: 1 = Moving Up)
- *   PD1  - Motor DOWN  Control   (GPIO Output: 1 = Moving Down)
- *   PD2  - Door Control          (GPIO Output: 1 = Door Open)
- *
- * HALL REQUESTS (Future Extension):
- *   PE0  - Hall UP Request (Floor selections on outside panels)
- *   PE1  - Hall DOWN Request
- *
- * Update Rate: 1 second (configured via SysTick or Timer)
+ * Import this file, stm32_gpio_config.c/.h, elevator_controller.c/.h into a
+ * STM32CubeIDE project generated for your exact board and MCU family.
  */
 
-#include "stm32f4xx_hal.h"  /* Adjust to your STM32 variant (stm32h7xx_hal.h, etc.) */
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+
 #include "elevator_controller.h"
+#include "stm32_gpio_config.h"
+
+#ifndef ELEVATOR_ENABLE_IWDG
+#define ELEVATOR_ENABLE_IWDG 0
+#endif
 
 /* ============================================================================
- * GPIO PIN DEFINITIONS
- * ============================================================================ */
-
-/* Cabin Request Buttons - Port A (PA0 to PA7) and Port B (PB0 to PB1) */
-#define CABIN_FLOOR1_PORT     GPIOA
-#define CABIN_FLOOR1_PIN      GPIO_PIN_0
-#define CABIN_FLOOR2_PORT     GPIOA
-#define CABIN_FLOOR2_PIN      GPIO_PIN_1
-#define CABIN_FLOOR3_PORT     GPIOA
-#define CABIN_FLOOR3_PIN      GPIO_PIN_2
-#define CABIN_FLOOR4_PORT     GPIOA
-#define CABIN_FLOOR4_PIN      GPIO_PIN_3
-#define CABIN_FLOOR5_PORT     GPIOA
-#define CABIN_FLOOR5_PIN      GPIO_PIN_4
-#define CABIN_FLOOR6_PORT     GPIOA
-#define CABIN_FLOOR6_PIN      GPIO_PIN_5
-#define CABIN_FLOOR7_PORT     GPIOA
-#define CABIN_FLOOR7_PIN      GPIO_PIN_6
-#define CABIN_FLOOR8_PORT     GPIOA
-#define CABIN_FLOOR8_PIN      GPIO_PIN_7
-#define CABIN_FLOOR9_PORT     GPIOB
-#define CABIN_FLOOR9_PIN      GPIO_PIN_0
-#define CABIN_FLOOR10_PORT    GPIOB
-#define CABIN_FLOOR10_PIN     GPIO_PIN_1
-
-/* Safety Input Pins - Port C */
-#define EMERGENCY_STOP_PORT      GPIOC
-#define EMERGENCY_STOP_PIN       GPIO_PIN_0
-#define DOOR_OBSTRUCTION_PORT    GPIOC
-#define DOOR_OBSTRUCTION_PIN     GPIO_PIN_1
-#define UPPER_LIMIT_SWITCH_PORT  GPIOC
-#define UPPER_LIMIT_SWITCH_PIN   GPIO_PIN_2
-#define LOWER_LIMIT_SWITCH_PORT  GPIOC
-#define LOWER_LIMIT_SWITCH_PIN   GPIO_PIN_3
-
-/* Motor Control Output Pins - Port D */
-#define MOTOR_UP_PORT         GPIOD
-#define MOTOR_UP_PIN          GPIO_PIN_0
-#define MOTOR_DOWN_PORT       GPIOD
-#define MOTOR_DOWN_PIN        GPIO_PIN_1
-#define DOOR_CONTROL_PORT     GPIOD
-#define DOOR_CONTROL_PIN      GPIO_PIN_2
-
-/* Hall Request Input Pins - Port E (Future Extension) */
-#define HALL_UP_PORT          GPIOE
-#define HALL_UP_PIN           GPIO_PIN_0
-#define HALL_DOWN_PORT        GPIOE
-#define HALL_DOWN_PIN         GPIO_PIN_1
-
-/* ============================================================================
- * GLOBAL VARIABLES
+ * PRIVATE DATA
  * ============================================================================ */
 
 static ElevatorController g_elevator_controller;
-static uint32_t g_update_counter = 0;
-static const uint32_t UPDATE_INTERVAL = 1000; /* Update every 1000ms */
+static volatile uint32_t g_update_counter_ms = 0;
+static volatile bool g_controller_update_due = false;
+static volatile bool g_firmware_initialized = false;
+
+#if ELEVATOR_ENABLE_IWDG
+static IWDG_HandleTypeDef g_iwdg;
+#endif
 
 /* ============================================================================
- * FUNCTION PROTOTYPES
+ * PRIVATE FUNCTION PROTOTYPES
  * ============================================================================ */
 
 void SystemClock_Config(void);
-void GPIO_Init(void);
-void UART_Init(void);
 void SysTick_Handler(void);
+void Error_Handler(void);
 
-static void HAL_GPIO_SetPin(GPIO_TypeDef *gpio_port, uint16_t pin);
-static void HAL_GPIO_ResetPin(GPIO_TypeDef *gpio_port, uint16_t pin);
-static GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *gpio_port, uint16_t pin);
-static ElevatorInputs HAL_ReadInputs(void);
-static void HAL_UpdateMotorOutputs(const ElevatorController *controller);
-static void HAL_UART_PrintStatus(const ElevatorController *controller);
-
-/* ============================================================================
- * HELPER FUNCTIONS - GPIO PIN CONTROL
- * ============================================================================ */
-
-/**
- * @brief Set a GPIO pin to HIGH (1)
- */
-static void HAL_GPIO_SetPin(GPIO_TypeDef *gpio_port, uint16_t pin)
-{
-    gpio_port->BSRR = pin;
-}
-
-/**
- * @brief Reset a GPIO pin to LOW (0)
- */
-static void HAL_GPIO_ResetPin(GPIO_TypeDef *gpio_port, uint16_t pin)
-{
-    gpio_port->BSRR = (uint32_t)pin << 16U;
-}
-
-/**
- * @brief Read a GPIO input pin state
- * @return GPIO_PIN_SET (1) or GPIO_PIN_RESET (0)
- */
-static GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *gpio_port, uint16_t pin)
-{
-    return (GPIO_PinState)((gpio_port->IDR & pin) >> __builtin_ctz(pin));
-}
+static ElevatorInputs App_ReadInputs(void);
+static void App_UpdateOutputs(const ElevatorController *controller,
+                              const ElevatorSafetyInputs *safety_inputs);
+static void App_PrintStatus(const ElevatorController *controller);
+static void App_WatchdogInit(void);
+static void App_WatchdogRefresh(void);
 
 /* ============================================================================
- * INPUT READING FUNCTIONS
+ * INPUT / OUTPUT ADAPTERS
  * ============================================================================ */
 
-/**
- * @brief Read all inputs from GPIO pins
- * @return ElevatorInputs structure with current button and sensor states
- */
-static ElevatorInputs HAL_ReadInputs(void)
+static ElevatorInputs App_ReadInputs(void)
 {
     ElevatorInputs inputs;
+    ElevatorSafetyInputs safety_inputs = Elevator_GPIO_ReadSafetyInputs();
 
-    /* Read cabin request buttons (PA0-PA7, PB0-PB1) */
-    inputs.cabin_request_floor = 0;
+    inputs.cabin_request_floor = Elevator_GPIO_GetCabinRequestFloor();
+    inputs.hall_up_request_floor = Elevator_GPIO_GetHallUpRequestFloor();
+    inputs.hall_down_request_floor = Elevator_GPIO_GetHallDownRequestFloor();
 
-    if (HAL_GPIO_ReadPin(CABIN_FLOOR1_PORT, CABIN_FLOOR1_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 1;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR2_PORT, CABIN_FLOOR2_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 2;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR3_PORT, CABIN_FLOOR3_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 3;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR4_PORT, CABIN_FLOOR4_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 4;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR5_PORT, CABIN_FLOOR5_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 5;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR6_PORT, CABIN_FLOOR6_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 6;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR7_PORT, CABIN_FLOOR7_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 7;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR8_PORT, CABIN_FLOOR8_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 8;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR9_PORT, CABIN_FLOOR9_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 9;
-    else if (HAL_GPIO_ReadPin(CABIN_FLOOR10_PORT, CABIN_FLOOR10_PIN) == GPIO_PIN_SET)
-        inputs.cabin_request_floor = 10;
-
-    /* Read hall request buttons (currently set to 0, extend as needed) */
-    inputs.hall_up_request_floor = 0;
-    inputs.hall_down_request_floor = 0;
-
-    /* Read safety input pins (PC0-PC3) */
-    inputs.emergency_stop = (HAL_GPIO_ReadPin(EMERGENCY_STOP_PORT, EMERGENCY_STOP_PIN) == GPIO_PIN_SET);
-    inputs.door_obstruction = (HAL_GPIO_ReadPin(DOOR_OBSTRUCTION_PORT, DOOR_OBSTRUCTION_PIN) == GPIO_PIN_SET);
-    inputs.upper_limit_switch = (HAL_GPIO_ReadPin(UPPER_LIMIT_SWITCH_PORT, UPPER_LIMIT_SWITCH_PIN) == GPIO_PIN_SET);
-    inputs.lower_limit_switch = (HAL_GPIO_ReadPin(LOWER_LIMIT_SWITCH_PORT, LOWER_LIMIT_SWITCH_PIN) == GPIO_PIN_SET);
+    inputs.door_obstruction = safety_inputs.door_obstruction;
+    inputs.emergency_stop = safety_inputs.emergency_stop;
+    inputs.upper_limit_switch = safety_inputs.upper_limit_switch;
+    inputs.lower_limit_switch = safety_inputs.lower_limit_switch;
+    inputs.measured_floor = Elevator_GPIO_GetMeasuredFloor();
 
     return inputs;
 }
 
-/* ============================================================================
- * OUTPUT CONTROL FUNCTIONS
- * ============================================================================ */
-
-/**
- * @brief Update motor and door control outputs based on controller state
- */
-static void HAL_UpdateMotorOutputs(const ElevatorController *controller)
+static void App_UpdateOutputs(const ElevatorController *controller,
+                              const ElevatorSafetyInputs *safety_inputs)
 {
-    /* Control Motor UP pin (PD0) */
-    if (controller->motor == MOTOR_UP)
+    ElevatorOutputDirection requested_direction = ELEVATOR_OUTPUT_STOPPED;
+
+    if (safety_inputs->emergency_stop ||
+        (safety_inputs->upper_limit_switch && controller->motor == MOTOR_UP) ||
+        (safety_inputs->lower_limit_switch && controller->motor == MOTOR_DOWN))
     {
-        HAL_GPIO_SetPin(MOTOR_UP_PORT, MOTOR_UP_PIN);
-    }
-    else
-    {
-        HAL_GPIO_ResetPin(MOTOR_UP_PORT, MOTOR_UP_PIN);
+        Elevator_GPIO_AllOutputsOff();
+        return;
     }
 
-    /* Control Motor DOWN pin (PD1) */
-    if (controller->motor == MOTOR_DOWN)
+    switch (controller->motor)
     {
-        HAL_GPIO_SetPin(MOTOR_DOWN_PORT, MOTOR_DOWN_PIN);
-    }
-    else
-    {
-        HAL_GPIO_ResetPin(MOTOR_DOWN_PORT, MOTOR_DOWN_PIN);
+    case MOTOR_UP:
+        requested_direction = ELEVATOR_OUTPUT_MOVING_UP;
+        break;
+
+    case MOTOR_DOWN:
+        requested_direction = ELEVATOR_OUTPUT_MOVING_DOWN;
+        break;
+
+    case MOTOR_STOP:
+    default:
+        requested_direction = ELEVATOR_OUTPUT_STOPPED;
+        break;
     }
 
-    /* Control Door pin (PD2) */
-    if (controller->door_open)
-    {
-        HAL_GPIO_SetPin(DOOR_CONTROL_PORT, DOOR_CONTROL_PIN);
-    }
-    else
-    {
-        HAL_GPIO_ResetPin(DOOR_CONTROL_PORT, DOOR_CONTROL_PIN);
-    }
+    (void)Elevator_GPIO_SetMotorDirection(requested_direction);
+    Elevator_GPIO_SetDoorOpen(controller->door_open);
 }
 
-/* ============================================================================
- * UART DEBUGGING FUNCTIONS
- * ============================================================================ */
-
-/**
- * @brief Print controller status via UART (optional for debugging)
- */
-static void HAL_UART_PrintStatus(const ElevatorController *controller)
+static void App_PrintStatus(const ElevatorController *controller)
 {
-    /* Note: UART is optional and may not be needed in production.
-     * Remove or conditionally compile this function as needed.
-     * Requires UART initialization and retarget of printf().
-     */
-
 #ifdef DEBUG_UART_ENABLED
-    printf("Floor: %d | Target: %d | State: %s | Motor: %s | Door: %s\n",
+    printf("Floor: %d | Target: %d | State: %s | Motor: %s | Door: %s\r\n",
            controller->current_floor,
            controller->target_floor,
            Elevator_StateToString(controller->state),
            Elevator_MotorToString(controller->motor),
            controller->door_open ? "OPEN" : "CLOSED");
+#else
+    (void)controller;
 #endif
 }
 
 /* ============================================================================
- * GPIO INITIALIZATION
+ * WATCHDOG SUPPORT
  * ============================================================================ */
 
-/**
- * @brief Initialize GPIO pins for inputs and outputs
- *
- * Input Configuration (Pull-up):
- *   - PA0-PA7: Cabin request buttons (Floor 1-8)
- *   - PB0-PB1: Cabin request buttons (Floor 9-10)
- *   - PC0-PC3: Safety inputs
- *   - PE0-PE1: Hall request buttons
- *
- * Output Configuration (Push-Pull):
- *   - PD0: Motor UP control
- *   - PD1: Motor DOWN control
- *   - PD2: Door control
- */
-void GPIO_Init(void)
+static void App_WatchdogInit(void)
 {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
+#if ELEVATOR_ENABLE_IWDG
+    g_iwdg.Instance = IWDG;
+    g_iwdg.Init.Prescaler = IWDG_PRESCALER_64;
+    g_iwdg.Init.Reload = 2500;
 
-    /* Enable GPIO port clocks */
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
-    __HAL_RCC_GPIOE_CLK_ENABLE();
-
-    /* ========== CONFIGURE INPUT PINS (PA0-PA7) - Cabin Buttons Floor 1-8 ========== */
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 |
-                          GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_PULLUP; /* Pull-up: Button press pulls to GND */
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    /* ========== CONFIGURE INPUT PINS (PB0-PB1) - Cabin Buttons Floor 9-10 ========== */
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-    /* ========== CONFIGURE INPUT PINS (PC0-PC3) - Safety Inputs ========== */
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-    /* ========== CONFIGURE OUTPUT PINS (PD0-PD2) - Motor & Door Control ========== */
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP; /* Push-Pull output */
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-    /* ========== CONFIGURE INPUT PINS (PE0-PE1) - Hall Requests ========== */
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1;
-    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-    /* Initialize all outputs to LOW (motors off, door closed) */
-    HAL_GPIO_ResetPin(MOTOR_UP_PORT, MOTOR_UP_PIN);
-    HAL_GPIO_ResetPin(MOTOR_DOWN_PORT, MOTOR_DOWN_PIN);
-    HAL_GPIO_ResetPin(DOOR_CONTROL_PORT, DOOR_CONTROL_PIN);
+    if (HAL_IWDG_Init(&g_iwdg) != HAL_OK)
+    {
+        Error_Handler();
+    }
+#endif
 }
 
-/* ============================================================================
- * UART INITIALIZATION (Optional for Debug)
- * ============================================================================ */
-
-void UART_Init(void)
+static void App_WatchdogRefresh(void)
 {
-    /* Optional: Configure UART for debugging output
-     * This would typically use USART2 or USART3 and requires
-     * retargeting of printf() to work correctly.
-     * For now, this is a placeholder.
-     */
+#if ELEVATOR_ENABLE_IWDG
+    if (HAL_IWDG_Refresh(&g_iwdg) != HAL_OK)
+    {
+        Error_Handler();
+    }
+#endif
 }
 
 /* ============================================================================
@@ -344,7 +163,10 @@ void SystemClock_Config(void)
     RCC_OscInitTypeDef RCC_OscInitStruct = {0};
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-    /* Initialize the RCC Oscillators according to the specified parameters */
+    /*
+     * Default STM32F4-style clock tree. Replace with the STM32CubeMX-generated
+     * SystemClock_Config() for your exact board before flashing real hardware.
+     */
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
     RCC_OscInitStruct.HSIState = RCC_HSI_ON;
     RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
@@ -354,49 +176,53 @@ void SystemClock_Config(void)
     RCC_OscInitStruct.PLL.PLLN = 360;
     RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
     RCC_OscInitStruct.PLL.PLLQ = 7;
-    HAL_RCC_OscConfig(&RCC_OscInitStruct);
 
-    /* Activate the Over-Drive to reach the 180 Mhz Frequency */
-    HAL_PWREx_EnableOverDrive();
+    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+    {
+        Error_Handler();
+    }
 
-    /* Select PLL as system clock source and configure the HCLK, PCLK1 and PCLK2 clocks dividers */
+#if defined(PWR_CR_ODEN)
+    if (HAL_PWREx_EnableOverDrive() != HAL_OK)
+    {
+        Error_Handler();
+    }
+#endif
+
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
                                    RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
     RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
-    HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5);
+
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+    {
+        Error_Handler();
+    }
 }
 
 /* ============================================================================
  * SYSTICK INTERRUPT HANDLER
  * ============================================================================ */
 
-/**
- * @brief SysTick interrupt handler called every 1ms
- * Accumulates time and triggers controller update every UPDATE_INTERVAL ms
- */
 void SysTick_Handler(void)
 {
     HAL_IncTick();
 
-    g_update_counter++;
-    if (g_update_counter >= UPDATE_INTERVAL)
+    if (!g_firmware_initialized)
     {
-        g_update_counter = 0;
+        return;
+    }
 
-        /* Read inputs from GPIO pins */
-        ElevatorInputs inputs = HAL_ReadInputs();
+    Elevator_GPIO_DebounceTick();
+    Elevator_GPIO_ServiceOutputs();
 
-        /* Update elevator controller logic */
-        Elevator_Update(&g_elevator_controller, inputs);
-
-        /* Update output pins based on new controller state */
-        HAL_UpdateMotorOutputs(&g_elevator_controller);
-
-        /* Optional: Print status via UART (if enabled) */
-        HAL_UART_PrintStatus(&g_elevator_controller);
+    g_update_counter_ms++;
+    if (g_update_counter_ms >= ELEVATOR_UPDATE_INTERVAL)
+    {
+        g_update_counter_ms = 0;
+        g_controller_update_due = true;
     }
 }
 
@@ -406,72 +232,65 @@ void SysTick_Handler(void)
 
 int main(void)
 {
-    /* Reset all peripherals and initialize the Flash interface */
     HAL_Init();
-
-    /* Configure the system clock */
     SystemClock_Config();
-
-    /* Initialize GPIO pins */
-    GPIO_Init();
-
-    /* Initialize UART for debugging (optional) */
-    /* UART_Init(); */
-
-    /* Initialize elevator controller */
+    Elevator_GPIO_Init();
     Elevator_Init(&g_elevator_controller);
+    App_WatchdogInit();
+    g_firmware_initialized = true;
 
-    /* Configure SysTick to generate interrupt every 1ms */
-    HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000);
+    HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq() / 1000U);
     HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
 
-    /* Main loop: The controller update happens in SysTick_Handler() every 1 second */
     while (1)
     {
-        /* Application can perform other non-blocking tasks here */
-        /* All elevator control logic runs in the SysTick interrupt handler */
-        /* This ensures deterministic timing and responsive input handling */
+        if (g_controller_update_due)
+        {
+            __disable_irq();
+            g_controller_update_due = false;
+            __enable_irq();
 
-        __WFI(); /* Wait for Interrupt - reduces power consumption */
+            ElevatorInputs inputs = App_ReadInputs();
+            ElevatorSafetyInputs safety_inputs = Elevator_GPIO_ReadSafetyInputs();
+
+            Elevator_Update(&g_elevator_controller, inputs);
+            App_UpdateOutputs(&g_elevator_controller, &safety_inputs);
+            App_PrintStatus(&g_elevator_controller);
+            App_WatchdogRefresh();
+        }
+
+        __WFI();
     }
-
-    return 0;
 }
 
 /* ============================================================================
- * NOTES FOR STM32CubeIDE INTEGRATION
+ * ERROR HANDLER
+ * ============================================================================ */
+
+void Error_Handler(void)
+{
+    __disable_irq();
+    Elevator_GPIO_AllOutputsOff();
+
+    while (1)
+    {
+        /* Stay in a safe stopped state. A hardware watchdog can reset the MCU. */
+    }
+}
+
+/* ============================================================================
+ * STM32CUBEIDE INTEGRATION NOTES
  * ============================================================================
- *
- * 1. GPIO PIN SELECTION:
- *    - Cabin buttons: PA0-PA7, PB0-PB1 (10 pins for 10 floors)
- *    - Safety inputs: PC0-PC3 (4 pins)
- *    - Motor outputs: PD0-PD2 (3 pins)
- *    - Hall requests: PE0-PE1 (2 pins - for future use)
- *
- * 2. BUTTON DEBOUNCING:
- *    To improve reliability, consider adding software debouncing:
- *    - Add a delay before reading the pin again
- *    - Sample the pin multiple times and check consistency
- *    - Use a debounce counter for each button
- *
- * 3. INTERRUPT-DRIVEN INPUT HANDLING (Optional):
- *    Instead of polling in SysTick, you can enable GPIO EXTI interrupts:
- *    - Configure PA0-PA7, PB0-PB1, PC0-PC3 as EXTI inputs
- *    - Set interrupt priority below SysTick
- *    - Store button states in the interrupt handler
- *    - Read stored states in main SysTick handler
- *
- * 4. PWM FOR MOTOR CONTROL (Optional):
- *    For more realistic motor control with variable speed:
- *    - Use Timer PWM output on PD0, PD1 instead of simple GPIO
- *    - Modulate PWM duty cycle based on desired speed
- *    - Allow smooth acceleration/deceleration
- *
- * 5. COMPILATION IN STM32CubeIDE:
- *    - Include this file in your STM32 project
- *    - Link against elevator_controller.c
- *    - Ensure HAL libraries are properly included
- *    - Disable SysTick_Handler in startup code if using this custom handler
- *
- * ============================================================================
- */
+ * 1. Generate a CubeIDE project for the exact STM32 part/board.
+ * 2. Replace SystemClock_Config() with the CubeMX-generated clock function.
+ * 3. Add elevator_controller.c and stm32_gpio_config.c to the build.
+ * 4. Set ELEVATOR_STM32_HAL_HEADER if the project does not use stm32f4xx_hal.h.
+ * 5. Verify every GPIO pin against the schematic and package pinout.
+ * 6. Enable ELEVATOR_ENABLE_FLOOR_SENSORS only after wiring real floor sensors.
+ * 7. Drive motors through an isolated driver/relay stage with hardware interlocks.
+ * 8. Wire emergency stop and final limit switches into hardware safety circuits;
+ *    software handling is only a secondary layer of protection.
+ * 9. Enable DEBUG_UART_ENABLED only after retargeting printf() to a UART.
+ * 10. Enable ELEVATOR_ENABLE_IWDG after validating the independent watchdog
+ *     timeout for the selected clock configuration.
+ * ============================================================================ */
